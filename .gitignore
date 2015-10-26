@@ -21,4 +21,6 @@ node_modules
 .idea/
 *.iml
 
-WEB-INF/*
+# cfml
+WEB-INF/
+testbox/

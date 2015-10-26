@@ -81,6 +81,10 @@ component {
 		}
 	}
 
+	function release (lock, callback) {
+		unlock(lock, callback);
+	}
+
 	function extend (lock, ttl, callback) {
 		if (lock.expiration < unixtime()) {
 			throw(message="Cannot extend lock on resource " & lock.resource & " because the lock has already expired");
@@ -173,7 +177,8 @@ component {
 	}
 
 	private string function _random () {
-		return hash(rand("SHA1PRNG"), "sha1");
+		//return hash(rand("SHA1PRNG"), "sha1");
+		return createUUID();
 	}
 
 	private numeric function unixtime () {

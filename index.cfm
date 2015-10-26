@@ -9,7 +9,7 @@
 		if (err) throw(err);
 		writedump(lock);
 
-		//lock.unlock();
+		lock.unlock();
 	});
 
 
