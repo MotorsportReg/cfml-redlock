@@ -61,8 +61,13 @@ component {
 	}
 
 	function unlock (lock, callback) {
+		//dump("unlock");
+		//dump(var=lock, label="lock", expand=false);
+		//dump(var=callback, label="cb", expand=false);
+
 		if (lock.expiration < unixtime()) {
 			//lock has expired
+			//dump("expired");
 			return callback(false, '');
 		}
 
@@ -71,10 +76,14 @@ component {
 		var waiting = arrayLen(servers);
 
 		var loop = function (err, response) {
+			//dump("unlock loop");
+			//dump(err);
+			//dump(response);
 			if (err) throw(err);
-			if (waiting -- > 1) return;
-			return response;
+			if (waiting-- > 1) return;
+			return callback(getNull(), response);
 		};
+
 
 		for (var srv in servers) {
 			srv.evalWithCallback(unlockScript, lock.resource, lock.value, loop);
@@ -99,6 +108,8 @@ component {
 
 	function _lock (string resource, any value = getNull(), numeric ttl, callback) {
 
+		//dump(arguments);;
+
 		var request = "";
 		var attempts = 0;
 
@@ -106,17 +117,20 @@ component {
 			//create a lock
 			value = _random();
 			request = function (srv, loop) {
+				//dump("create lock request");
 				return srv.setNxPx(resource, value, ttl, loop);
 			};
 		} else {
 			//extend a lock
 			request = function (srv, loop) {
+				//dump("extend lock request");
 				return srv.evalWithCallback(extendScript, [resource], [value, ttl], loop);
 			};
 		}
 
 		var attempt = function() {
 			attempts++;
+			//dump(attempts);
 
 			var start = unixtime();
 			var votes = 0;
@@ -124,6 +138,9 @@ component {
 			var waiting = arrayLen(servers);
 
 			var loop = function (err, response) {
+				//dump("loop");
+				//dump(err);
+				//dump(response);
 				if (err) {
 					throw(err); //todo: call callback with err;
 				}
@@ -141,18 +158,26 @@ component {
 
 				// SUCCESS: there is consensus and the lock is not expired
 				if(votes >= quorum && lock.expiration > unixtime()) {
+					//dump("success");
 					return callback(false, lock);
 				}
 
+				//dump(votes);
+				//dump(waiting);
+				//dump(lock);
+
 				// remove this lock from servers that voted for it
 				return lock.unlock(function(){
+					//dump("unlock callback");
 					// RETRY
 					if(attempts <= retryCount) {
+						//dump("retry");
 						sleep(retryDelay);
 						return attempt();
 					}
 
 					// FAILED
+					//dump("Failed");
 					//return reject(new LockError('Exceeded ' + self.retryCount + ' attempts to lock the resource "' + resource + '".'));
 					return callback({message: "Exceeded " & retryCount & " attempts to lock the resource " & resource}, getNull());
 				});
@@ -193,6 +218,7 @@ component {
 			value: value,
 			expiration: expiration,
 			unlock: function (callback) {
+				//dump("lock.unlock");
 				if (isNull(callback)) {
 					callback = function(){};
 				}

@@ -77,43 +77,125 @@ component extends="testbox.system.BaseSpec" {
 			}
 
 			//gotta make this a struct because ACF once again...
-			var state = {};
 
-			state.one = false;
 			it("should lock a resource", function() {
+				var resource = resource & createUUID();
+				var one = false;
+
 				redlock.lock(resource, 200, function(err, lock) {
 					if (err) throw(err);
 					expect(lock).toBeStruct();
 					expect(lock.expiration).toBeGT(unixtime() - 1);
-					state.one = lock;
+					one = lock;
 				});
 			});
 
-			writedump(state);
-
-			state.two = false;
-			state.two_expiration = 0;
 			it("should wait until a lock expires before issuing another lock", function() {
-				writedump(state);
-				expect(state.one).toBeStruct("Could not run because a required previous test failed.");
-				redlock.lock(resource, 800, function(err, lock) {
+				var resource = resource & createUUID();
+				var one = false;
+				var two = false;
+				var two_expiration = 0;
+				redlock.lock(resource, 200, function(err, lock) {
 					if (err) throw(err);
 					expect(lock).toBeStruct();
 					expect(lock.expiration).toBeGT(unixtime() - 1);
-					expect(unixTime() + 1).toBeGT(one.expiration);
-					state.two = lock;
-					//writedump(state);abort;
-					state.two_expiration = lock.expiration;
+					one = lock;
+
+					expect(one).toBeStruct("Could not run because a required previous test failed.");
+					redlock.lock(resource, 800, function(err, lock) {
+						if (err) throw(err);
+						expect(lock).toBeStruct();
+						expect(lock.expiration).toBeGT(unixtime() - 1);
+						expect(unixTime() + 1).toBeGT(one.expiration);
+						two = lock;
+						two_expiration = lock.expiration;
+					});
 				});
 			});
 
-			writedump(state);
-
 			it("should unlock a resource", function() {
-				expect(state.two).toBeStruct("Could not run because a required previous test failed.");
-				two.unlock();
+				var resource = resource & createUUID();
+				var one = false;
+				var two = false;
+				var two_expiration = 0;
+				redlock.lock(resource, 200, function(err, lock) {
+					if (err) throw(err);
+					expect(lock).toBeStruct();
+					expect(lock.expiration).toBeGT(unixtime() - 1);
+					one = lock;
+
+					one.unlock();
+				});
 			});
 
+			it("should silently fail to unlock an already-unlocked resource", function() {
+				var resource = resource & createUUID();
+				var one = false;
+				var two = false;
+				var two_expiration = 0;
+				redlock.lock(resource, 200, function(err, lock) {
+					if (err) throw(err);
+					expect(lock).toBeStruct();
+					expect(lock.expiration).toBeGT(unixtime() - 1);
+					one = lock;
+
+					expect(one).toBeStruct("Could not run because a required previous test failed.");
+					redlock.lock(resource, 800, function(err, lock) {
+						if (err) throw(err);
+						expect(lock).toBeStruct();
+						expect(lock.expiration).toBeGT(unixtime() - 1);
+						expect(unixTime() + 1).toBeGT(one.expiration);
+						two = lock;
+						two_expiration = lock.expiration;
+
+						expect(two).toBeStruct("Could not run because a required previous test failed.");
+						two.unlock();
+
+						two.unlock();
+					});
+				});
+			});
+
+			it("should fail to extend a lock on an already-unlocked resource", function() {
+
+				var resource = resource & ":fail-extend-unlock";
+				var one = false;
+				var two = false;
+				var two_expiration = 0;
+
+
+
+				redlock.lock(resource, 200, function(err, lock) {
+					if (err) throw(err);
+					expect(lock).toBeStruct();
+					expect(lock.expiration).toBeGT(unixtime() - 1);
+					one = lock;
+
+					//expect(true).toBeFalse();
+
+					expect(one).toBeStruct("Could not run because a required previous test failed.");
+					redlock.lock(resource, 800, function(err, lock) {
+						if (err) throw(err);
+						expect(lock).toBeStruct();
+						expect(lock.expiration).toBeGT(unixtime() - 1);
+						expect(unixTime() + 1).toBeGT(one.expiration);
+						two = lock;
+						two_expiration = lock.expiration;
+
+						expect(two).toBeStruct("Could not run because a required previous test failed.");
+						two.unlock();
+
+
+
+						writedump(two);abort;
+
+						two.extend(200, function(err, lock){
+							expect(err).toBeNull();
+							writedump(err);abort;
+						});
+					});
+				});
+			});
 		});
 	}
 
