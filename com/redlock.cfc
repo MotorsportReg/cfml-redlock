@@ -52,23 +52,23 @@ component {
 		return retryDelay;
 	}
 
-	function lock (string resource, numeric ttl, any callback) {
-		return _lock(resource, getNull(), ttl, callback);
+	function lock (string resource, numeric ttl, any cb) {
+		return _lock(resource, getNull(), ttl, arguments.cb);
 	}
 
-	function aquire (string resource, numeric ttl, any callback) {
-		lock(resource, ttl, callback);
+	function aquire (string resource, numeric ttl, any cb) {
+		lock(resource, ttl, arguments.cb);
 	}
 
-	function unlock (lock, callback) {
-		//dump("unlock");
-		//dump(var=lock, label="lock", expand=false);
-		//dump(var=callback, label="cb", expand=false);
+	function unlock (lock, cb) {
+		//writedump("unlock");
+		//writedump(var=lock, label="lock", expand=false);
+		//writedump(var=cb, label="cb", expand=false);
 
 		if (lock.expiration < unixtime()) {
 			//lock has expired
-			//dump("expired");
-			return callback(false, '');
+			writedump("expired");
+			return arguments.cb(false, '');
 		}
 
 		lock.expiration = 0;
@@ -76,12 +76,12 @@ component {
 		var waiting = arrayLen(servers);
 
 		var loop = function (err, response) {
-			//dump("unlock loop");
-			//dump(err);
-			//dump(response);
+			//writedump("unlock loop");
+			//writedump(err);
+			//writedump(response);
 			if (err) throw(err);
 			if (waiting-- > 1) return;
-			return callback(getNull(), response);
+			return cb(false, response);
 		};
 
 
@@ -90,25 +90,26 @@ component {
 		}
 	}
 
-	function release (lock, callback) {
-		unlock(lock, callback);
+	function release (lock, cb) {
+		unlock(lock, arguments.cb);
 	}
 
-	function extend (lock, ttl, callback) {
+	function extend (lock, ttl, cb) {
 		if (lock.expiration < unixtime()) {
 			throw(message="Cannot extend lock on resource " & lock.resource & " because the lock has already expired");
 		}
 
-		return _lock(lock.resource, lock.value, ttl, callback);
+		return _lock(lock.resource, lock.value, ttl, arguments.cb);
 
 		//there was some extra stuff in the node library here that I think is unecessary...
 		//https://github.com/mike-marcacci/node-redlock/blob/master/redlock.js#L186
 		//making note in case im wrong
 	}
 
-	function _lock (string resource, any value = getNull(), numeric ttl, callback) {
+	function _lock (string resource, any value = getNull(), numeric ttl, any cb) {
 
-		//dump(arguments);;
+
+		//writedump(arguments);;
 
 		var request = "";
 		var attempts = 0;
@@ -117,20 +118,20 @@ component {
 			//create a lock
 			value = _random();
 			request = function (srv, loop) {
-				//dump("create lock request");
+				//writedump("create lock request");
 				return srv.setNxPx(resource, value, ttl, loop);
 			};
 		} else {
 			//extend a lock
 			request = function (srv, loop) {
-				//dump("extend lock request");
+				//writedump("extend lock request");
 				return srv.evalWithCallback(extendScript, [resource], [value, ttl], loop);
 			};
 		}
 
 		var attempt = function() {
 			attempts++;
-			//dump(attempts);
+			//writedump(var=attempts, label="attempt count");
 
 			var start = unixtime();
 			var votes = 0;
@@ -138,11 +139,12 @@ component {
 			var waiting = arrayLen(servers);
 
 			var loop = function (err, response) {
-				//dump("loop");
-				//dump(err);
-				//dump(response);
+
+				//writedump("loop");
+				//writedump(err);
+				//writedump(response);
 				if (err) {
-					throw(err); //todo: call callback with err;
+					throw(err); //todo: call cb with err;
 				}
 				if (!isNull(response) && len(response)) {
 					votes++;
@@ -154,32 +156,33 @@ component {
 				// Add 2 milliseconds to the drift to account for Redis expires precision, which is 1 ms,
 				// plus the configured allowable drift factor
 				var drift = round(driftFactor * ttl) + 2;
+
 				var lock = _makeLock(this, resource, value, start + ttl - drift);
 
 				// SUCCESS: there is consensus and the lock is not expired
 				if(votes >= quorum && lock.expiration > unixtime()) {
-					//dump("success");
-					return callback(false, lock);
+					//writedump("success");
+					return cb(false, lock);
 				}
 
-				//dump(votes);
-				//dump(waiting);
-				//dump(lock);
+				//writedump(votes);
+				//writedump(waiting);
+				//writedump(lock);
 
 				// remove this lock from servers that voted for it
 				return lock.unlock(function(){
-					//dump("unlock callback");
+					//writedump("unlock cb");
 					// RETRY
 					if(attempts <= retryCount) {
-						//dump("retry");
+						//writedump("retry");
 						sleep(retryDelay);
 						return attempt();
 					}
 
 					// FAILED
-					//dump("Failed");
+					//writedump("Failed");
 					//return reject(new LockError('Exceeded ' + self.retryCount + ' attempts to lock the resource "' + resource + '".'));
-					return callback({message: "Exceeded " & retryCount & " attempts to lock the resource " & resource}, getNull());
+					return cb({message: "Exceeded " & retryCount & " attempts to lock the resource " & resource}, getNull());
 				});
 
 			};
@@ -197,7 +200,7 @@ component {
 		return javaCast("null", 0);
 	}
 
-	private boolean function isCallback (callback) {
+	private boolean function isCallback (fn) {
 		return isCustomFunction(fn) || isClosure(fn);
 	}
 
@@ -218,17 +221,18 @@ component {
 			value: value,
 			expiration: expiration,
 			unlock: function (callback) {
-				//dump("lock.unlock");
-				if (isNull(callback)) {
-					callback = function(){};
+				//writedump("lock.unlock");
+
+				if (isNull(arguments.callback)) {
+					arguments.callback = function(){};
 				}
-				l.redlock.unlock(l, callback);
+				l.redlock.unlock(l, arguments.callback);
 			},
 			extend: function (ttl, callback) {
-				if (isNull(callback)) {
-					callback = function(){};
+				if (isNull(arguments.callback)) {
+					arguments.callback = function(){};
 				}
-				l.redlock.extend(l, ttl, callback);
+				l.redlock.extend(l, ttl, arguments.callback);
 			}
 		};
 
@@ -236,7 +240,7 @@ component {
 
 	}
 
-	private function __setNxPx (key, value, ttlms, callback) {
+	private function __setNxPx (key, value, ttlms, cb) {
 
 		var conn = getResource();
 
@@ -251,14 +255,14 @@ component {
 			result = '';
 		}
 
-		if (!isnull(callback)) {
-			return callback(false, result);
+		if (!isnull(arguments.cb)) {
+			return arguments.cb(false, result);
 		}
 
 		return result;
 	}
 
-	private function __evalWithCallback (script, keys, args, callback) {
+	private function __evalWithCallback (script, keys, args, cb) {
 
 		if (!isArray(keys)) {
 			keys = [keys];
@@ -276,8 +280,8 @@ component {
 			result = '';
 		}
 
-		if (!isnull(callback)) {
-			return callback(false, result);
+		if (!isnull(arguments.cb)) {
+			return arguments.cb(false, result);
 		}
 
 		return result;
