@@ -3,6 +3,7 @@ component {
 	property numeric driftFactor;
 	property numeric retryCount;
 	property numeric retryDelay;
+	property boolean debugEnabled;
 
 	function init (required array clients, struct options = {}) {
 
@@ -13,6 +14,7 @@ component {
 		variables.driftFactor = 0.01;
 		variables.retryCount = 3;
 		variables.retryDelay = 200;
+		variables.debugEnabled = false;
 
 		//todo: better validation ranges for these options?
 		if (!isNull(options.driftFactor) && isNumeric(options.driftFactor) && options.driftFactor >= 0) {
@@ -27,8 +29,12 @@ component {
 			retryDelay = options.retryDelay;
 		}
 
+		if (!isNull(options.debugEnabled) && isBoolean(options.debugEnabled)) {
+			debugEnabled = options.debugEnabled;
+		}
+
 		if (!arrayLen(clients)) {
-			throw(message="cfml-redlock must be instantiated with at least one client (redis server)");
+			throw("cfml-redlock must be instantiated with at least one client (redis server)");
 		}
 
 		variables.servers = clients;
@@ -57,18 +63,17 @@ component {
 	}
 
 	function aquire (string resource, numeric ttl, any cb) {
-		lock(resource, ttl, arguments.cb);
+		return lock(resource, ttl, arguments.cb);
 	}
 
 	function unlock (lock, cb) {
-		//writedump("unlock");
-		//writedump(var=lock, label="lock", expand=false);
-		//writedump(var=cb, label="cb", expand=false);
+		_trace("unlock");
+
 
 		if (lock.expiration < unixtime()) {
 			//lock has expired
-			writedump("expired");
-			return arguments.cb(false, '');
+			_trace("expired");
+			return arguments.cb('', '');
 		}
 
 		lock.expiration = 0;
@@ -76,12 +81,10 @@ component {
 		var waiting = arrayLen(servers);
 
 		var loop = function (err, response) {
-			//writedump("unlock loop");
-			//writedump(err);
-			//writedump(response);
-			if (err) throw(err);
+			_trace("unlock loop");
+			if (len(err)) return cb(err, getNull());
 			if (waiting-- > 1) return;
-			return cb(false, response);
+			return cb('', response);
 		};
 
 
@@ -96,20 +99,17 @@ component {
 
 	function extend (lock, ttl, cb) {
 		if (lock.expiration < unixtime()) {
-			throw(message="Cannot extend lock on resource " & lock.resource & " because the lock has already expired");
+			return cb("Cannot extend lock on resource " & lock.resource & " because the lock has already expired", getNull());
 		}
 
 		return _lock(lock.resource, lock.value, ttl, arguments.cb);
 
-		//there was some extra stuff in the node library here that I think is unecessary...
+		//there was some extra stuff in the node library here that I think is unnecessary...
 		//https://github.com/mike-marcacci/node-redlock/blob/master/redlock.js#L186
 		//making note in case im wrong
 	}
 
 	function _lock (string resource, any value = getNull(), numeric ttl, any cb) {
-
-
-		//writedump(arguments);;
 
 		var request = "";
 		var attempts = 0;
@@ -118,20 +118,19 @@ component {
 			//create a lock
 			value = _random();
 			request = function (srv, loop) {
-				//writedump("create lock request");
+				_trace("create lock request");
 				return srv.setNxPx(resource, value, ttl, loop);
 			};
 		} else {
 			//extend a lock
 			request = function (srv, loop) {
-				//writedump("extend lock request");
+				_trace("extend lock request");
 				return srv.evalWithCallback(extendScript, [resource], [value, ttl], loop);
 			};
 		}
 
 		var attempt = function() {
 			attempts++;
-			//writedump(var=attempts, label="attempt count");
 
 			var start = unixtime();
 			var votes = 0;
@@ -139,12 +138,9 @@ component {
 			var waiting = arrayLen(servers);
 
 			var loop = function (err, response) {
-
-				//writedump("loop");
-				//writedump(err);
-				//writedump(response);
-				if (err) {
-					throw(err); //todo: call cb with err;
+				_trace("loop");
+				if (len(err)) {
+					return cb(err, getNull());
 				}
 				if (!isNull(response) && len(response)) {
 					votes++;
@@ -161,28 +157,21 @@ component {
 
 				// SUCCESS: there is consensus and the lock is not expired
 				if(votes >= quorum && lock.expiration > unixtime()) {
-					//writedump("success");
-					return cb(false, lock);
+					_trace("success");
+					return cb('', lock);
 				}
-
-				//writedump(votes);
-				//writedump(waiting);
-				//writedump(lock);
 
 				// remove this lock from servers that voted for it
 				return lock.unlock(function(){
-					//writedump("unlock cb");
-					// RETRY
+					_trace("unlock cb");
 					if(attempts <= retryCount) {
-						//writedump("retry");
+						_trace("retry");
 						sleep(retryDelay);
 						return attempt();
 					}
 
-					// FAILED
-					//writedump("Failed");
-					//return reject(new LockError('Exceeded ' + self.retryCount + ' attempts to lock the resource "' + resource + '".'));
-					return cb({message: "Exceeded " & retryCount & " attempts to lock the resource " & resource}, getNull());
+					_trace("Failed");
+					return cb("Exceeded " & retryCount & " attempts to lock the resource " & resource, getNull());
 				});
 
 			};
@@ -205,6 +194,7 @@ component {
 	}
 
 	private string function _random () {
+		//we could use whatever we want here, we want it to be fast to generate but always unique
 		//return hash(rand("SHA1PRNG"), "sha1");
 		return createUUID();
 	}
@@ -221,14 +211,14 @@ component {
 			value: value,
 			expiration: expiration,
 			unlock: function (callback) {
-				//writedump("lock.unlock");
-
+				_trace("lock.unlock");
 				if (isNull(arguments.callback)) {
 					arguments.callback = function(){};
 				}
 				l.redlock.unlock(l, arguments.callback);
 			},
 			extend: function (ttl, callback) {
+				_trace("lock.extend");
 				if (isNull(arguments.callback)) {
 					arguments.callback = function(){};
 				}
@@ -243,10 +233,6 @@ component {
 	private function __setNxPx (key, value, ttlms, cb) {
 
 		var conn = getResource();
-
-		//var params = createObject("java", "redis.clients.jedis.params.set.SetParams").init();
-		//params.nx().px(JavaCast("long", ttlms));
-
 		var result = conn.set(JavaCast("String", key), JavaCast("String", value), JavaCast("String", "NX"), JavaCast("String", "PX"), JavaCast("long", ttlms));
 
 		returnResource(conn);
@@ -256,7 +242,7 @@ component {
 		}
 
 		if (!isnull(arguments.cb)) {
-			return arguments.cb(false, result);
+			return arguments.cb('', result);
 		}
 
 		return result;
@@ -268,20 +254,31 @@ component {
 			keys = [keys];
 		}
 
+		var i = 0;
+
+		for (i = 1; i <= arrayLen(keys); i++) {
+			keys[i] = toString(keys[i]);
+		}
+
 		if (!isArray(args)) {
 			args = [args];
 		}
 
+		for (i = 1; i <= arrayLen(args); i++) {
+			args[i] = toString(args[i]);
+		}
+
 		var conn = getResource();
 		var result = conn.eval(JavaCast("string", script), keys, args);
+
 		returnResource(conn);
 
 		if (isNull(result)) {
 			result = '';
 		}
 
-		if (!isnull(arguments.cb)) {
-			return arguments.cb(false, result);
+		if (!isNull(arguments.cb)) {
+			return arguments.cb('', result);
 		}
 
 		return result;
@@ -314,6 +311,24 @@ component {
 		target.__cleanup();
 
 		return target;
+	}
+
+	private function _trace (messages) {
+		//could use this to dump or log
+		if (debugEnabled) {
+			if (!isArray(messages)) {
+				messages = [messages];
+			}
+
+			for (var i = 1; i <= arrayLen(messages); i++) {
+				messages[i] = toString(messages[i]);
+			}
+
+			for (var message in messages) {
+				writedump(var=message);
+				writeoutput("<br />");
+			}
+		}
 	}
 
 }
