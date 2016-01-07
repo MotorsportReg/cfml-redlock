@@ -1,13 +1,23 @@
 component extends="testbox.system.BaseSpec" {
 
+	variables.system = createObject("java", "java.lang.System");
 
 	private numeric function unixtime () {
-		return createObject("java", "java.lang.System").currentTimeMillis();
+		return variables.system.currentTimeMillis();
 	}
 
+
 	private function getRedisClients () {
+
 		local.redisHost = "localhost";  // redis server hostname or ip address
-		local.redisPort = 6379;         // redis server ip address
+		local.redisPort = 6379;
+
+		local.env = variables.system.getenv();
+
+		if (!isNull(local.env.REDIS_PORT)) {
+			local.redisHost = listFirst(listLast(local.env.REDIS_PORT, "//"), ":");
+			local.redisPort = listLast(local.env.REDIS_PORT, ":");
+		}
 
 		// Configure connection pool
 		local.jedisPoolConfig = CreateObject("java", "redis.clients.jedis.JedisPoolConfig");
